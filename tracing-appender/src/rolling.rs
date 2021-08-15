@@ -26,7 +26,7 @@
 //! let file_appender = RollingFileAppender::new(Rotation::HOURLY, "/some/directory", "prefix.log");
 //! # }
 //! ```
-use crate::inner::InnerAppender;
+use crate::inner::{CustomFormatter, InnerAppender, LogFileFormatter};
 use chrono::{DateTime, Datelike, TimeZone, Timelike, Utc};
 use std::fmt::Debug;
 use std::io;
@@ -49,11 +49,11 @@ use std::path::Path;
 /// # }
 /// ```
 #[derive(Debug)]
-pub struct RollingFileAppender {
-    inner: InnerAppender,
+pub struct RollingFileAppender<F: LogFileFormatter> {
+    inner: InnerAppender<F>,
 }
 
-impl RollingFileAppender {
+impl<F: LogFileFormatter> RollingFileAppender<F> {
     /// Creates a new `RollingFileAppender`.
     ///
     /// A `RollingFileAppender` will have a fixed rotation whose frequency is
@@ -80,12 +80,12 @@ impl RollingFileAppender {
     pub fn new(
         rotation: Rotation,
         directory: impl AsRef<Path>,
-        file_name_prefix: impl AsRef<Path>,
-    ) -> RollingFileAppender {
+        file_name_formatter: F,
+    ) -> RollingFileAppender<F> {
         RollingFileAppender {
             inner: InnerAppender::new(
                 directory.as_ref(),
-                file_name_prefix.as_ref(),
+                file_name_formatter,
                 rotation,
                 Utc::now(),
             )
@@ -94,7 +94,7 @@ impl RollingFileAppender {
     }
 }
 
-impl io::Write for RollingFileAppender {
+impl<F: LogFileFormatter> io::Write for RollingFileAppender<F> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         self.inner.write(buf)
     }
@@ -132,11 +132,46 @@ impl io::Write for RollingFileAppender {
 /// ```
 ///
 /// This will result in a log file located at `/some/path/rolling.log.yyyy-MM-dd-HH-mm`.
-pub fn minutely(
+pub fn minutely<F>(
     directory: impl AsRef<Path>,
-    file_name_prefix: impl AsRef<Path>,
-) -> RollingFileAppender {
+    file_name_prefix: F,
+) -> RollingFileAppender<F> where F: AsRef<Path> {
     RollingFileAppender::new(Rotation::MINUTELY, directory, file_name_prefix)
+}
+
+/// Creates a minutely, rolling file appender. This will rotate the log file once per minute.
+///
+/// The appender returned by `rolling::minutely` can be used with `non_blocking` to create
+/// a non-blocking, minutely file appender.
+///
+/// The directory of the log file is specified with the `directory` argument.
+/// `file_name_prefix` specifies the _prefix_ of the log file. `RollingFileAppender`
+/// adds the current date, hour, and minute to the log file in UTC.
+///
+/// # Examples
+///
+/// ``` rust
+/// # #[clippy::allow(needless_doctest_main)]
+/// fn main () {
+/// # fn doc() {
+///     let appender = tracing_appender::rolling::minutely_custom("/some/path", |date| format!("rolling.{}.log", date.format("%F-%H-%M")));
+///     let (non_blocking_appender, _guard) = tracing_appender::non_blocking(appender);
+///
+///     let collector = tracing_subscriber::fmt().with_writer(non_blocking_appender);
+///
+///     tracing::collect::with_default(collector.finish(), || {
+///         tracing::event!(tracing::Level::INFO, "Hello");
+///     });
+/// # }
+/// }
+/// ```
+///
+/// This will result in a log file located at `/some/path/rolling.yyyy-MM-dd-HH-mm.log`.
+pub fn minutely_custom(
+    directory: impl AsRef<Path>,
+    file_name_formatter: fn(&DateTime<Utc>) -> String,
+) -> RollingFileAppender<CustomFormatter> {
+    RollingFileAppender::new(Rotation::MINUTELY, directory, CustomFormatter(file_name_formatter))
 }
 
 /// Creates an hourly, rolling file appender.
@@ -167,11 +202,46 @@ pub fn minutely(
 /// ```
 ///
 /// This will result in a log file located at `/some/path/rolling.log.yyyy-MM-dd-HH`.
-pub fn hourly(
+pub fn hourly<F>(
     directory: impl AsRef<Path>,
-    file_name_prefix: impl AsRef<Path>,
-) -> RollingFileAppender {
+    file_name_prefix: F,
+) -> RollingFileAppender<F> where F: AsRef<Path> {
     RollingFileAppender::new(Rotation::HOURLY, directory, file_name_prefix)
+}
+
+/// Creates an hourly, rolling file appender.
+///
+/// The appender returned by `rolling::hourly` can be used with `non_blocking` to create
+/// a non-blocking, hourly file appender.
+///
+/// The directory of the log file is specified with the `directory` argument.
+/// `file_name_prefix` specifies the _prefix_ of the log file. `RollingFileAppender`
+/// adds the current date and hour to the log file in UTC.
+///
+/// # Examples
+///
+/// ``` rust
+/// # #[clippy::allow(needless_doctest_main)]
+/// fn main () {
+/// # fn doc() {
+///     let appender = tracing_appender::rolling::hourly_custom("/some/path", |date| format!("rolling.{}.log", date.format("%F-%H")));
+///     let (non_blocking_appender, _guard) = tracing_appender::non_blocking(appender);
+///
+///     let collector = tracing_subscriber::fmt().with_writer(non_blocking_appender);
+///
+///     tracing::collect::with_default(collector.finish(), || {
+///         tracing::event!(tracing::Level::INFO, "Hello");
+///     });
+/// # }
+/// }
+/// ```
+///
+/// This will result in a log file located at `/some/path/rolling.yyyy-MM-dd-HH.log`.
+pub fn hourly_custom(
+    directory: impl AsRef<Path>,
+    file_name_formatter: fn(&DateTime<Utc>) -> String,
+) -> RollingFileAppender<CustomFormatter> {
+    RollingFileAppender::new(Rotation::HOURLY, directory, CustomFormatter(file_name_formatter))
 }
 
 /// Creates a file appender that rotates daily.
@@ -203,11 +273,47 @@ pub fn hourly(
 /// ```
 ///
 /// This will result in a log file located at `/some/path/rolling.log.yyyy-MM-dd-HH`.
-pub fn daily(
+pub fn daily<F>(
     directory: impl AsRef<Path>,
-    file_name_prefix: impl AsRef<Path>,
-) -> RollingFileAppender {
+    file_name_prefix: F,
+) -> RollingFileAppender<F> where F: AsRef<Path> {
     RollingFileAppender::new(Rotation::DAILY, directory, file_name_prefix)
+}
+
+/// Creates a file appender that rotates daily.
+///
+/// The appender returned by `rolling::daily` can be used with `non_blocking` to create
+/// a non-blocking, daily file appender.
+///
+/// A `RollingFileAppender` has a fixed rotation whose frequency is
+/// defined by [`Rotation`]. The `directory` and
+/// `file_name_prefix` arguments determine the location and file name's _prefix_
+/// of the log file. `RollingFileAppender` automatically appends the current date in UTC.
+///
+/// # Examples
+///
+/// ``` rust
+/// # #[clippy::allow(needless_doctest_main)]
+/// fn main () {
+/// # fn doc() {
+///     let appender = tracing_appender::rolling::daily_custom("/some/path", |date| format!("rolling.{}.log", date.format("%F")));
+///     let (non_blocking_appender, _guard) = tracing_appender::non_blocking(appender);
+///
+///     let collector = tracing_subscriber::fmt().with_writer(non_blocking_appender);
+///
+///     tracing::collect::with_default(collector.finish(), || {
+///         tracing::event!(tracing::Level::INFO, "Hello");
+///     });
+/// # }
+/// }
+/// ```
+///
+/// This will result in a log file located at `/some/path/rolling.yyyy-MM-dd-HH.log`.
+pub fn daily_custom(
+    directory: impl AsRef<Path>,
+    file_name_formatter: fn(&DateTime<Utc>) -> String,
+) -> RollingFileAppender<CustomFormatter> {
+    RollingFileAppender::new(Rotation::DAILY, directory, CustomFormatter(file_name_formatter))
 }
 
 /// Creates a non-rolling, file appender
@@ -237,8 +343,45 @@ pub fn daily(
 /// ```
 ///
 /// This will result in a log file located at `/some/path/non-rolling.log`.
-pub fn never(directory: impl AsRef<Path>, file_name: impl AsRef<Path>) -> RollingFileAppender {
-    RollingFileAppender::new(Rotation::NEVER, directory, file_name)
+pub fn never<F>(
+    directory: impl AsRef<Path>,
+    file_name_prefix: F,
+) -> RollingFileAppender<F> where F: AsRef<Path> {
+    RollingFileAppender::new(Rotation::NEVER, directory, file_name_prefix)
+}
+
+/// Creates a non-rolling, file appender
+///
+/// The appender returned by `rolling::never` can be used with `non_blocking` to create
+/// a non-blocking, non-rotating appender.
+///
+/// The location of the log file will be specified the `directory` passed in.
+/// `file_name` specifies the prefix of the log file. No date or time is appended.
+///
+/// # Examples
+///
+/// ``` rust
+/// # #[clippy::allow(needless_doctest_main)]
+/// fn main () {
+/// # fn doc() {
+///     let appender = tracing_appender::rolling::never_custom("/some/path", |_| "non-rolling.log".to_string());
+///     let (non_blocking_appender, _guard) = tracing_appender::non_blocking(appender);
+///
+///     let collector = tracing_subscriber::fmt().with_writer(non_blocking_appender);
+///
+///     tracing::collect::with_default(collector.finish(), || {
+///         tracing::event!(tracing::Level::INFO, "Hello");
+///     });
+/// # }
+/// }
+/// ```
+///
+/// This will result in a log file located at `/some/path/non-rolling.log`.
+pub fn never_custom(
+    directory: impl AsRef<Path>,
+    file_name_formatter: fn(&DateTime<Utc>) -> String,
+) -> RollingFileAppender<CustomFormatter> {
+    RollingFileAppender::new(Rotation::NEVER, directory, CustomFormatter(file_name_formatter))
 }
 
 /// Defines a fixed period for rolling of a log file.
@@ -360,7 +503,7 @@ mod test {
         false
     }
 
-    fn write_to_log(appender: &mut RollingFileAppender, msg: &str) {
+    fn write_to_log<F: LogFileFormatter>(appender: &mut RollingFileAppender<F>, msg: &str) {
         appender
             .write_all(msg.as_bytes())
             .expect("Failed to write to appender");
@@ -369,6 +512,18 @@ mod test {
 
     fn test_appender(rotation: Rotation, directory: TempDir, file_prefix: &str) {
         let mut appender = RollingFileAppender::new(rotation, directory.path(), file_prefix);
+
+        let expected_value = "Hello";
+        write_to_log(&mut appender, expected_value);
+        assert!(find_str_in_log(directory.path(), expected_value));
+
+        directory
+            .close()
+            .expect("Failed to explicitly close TempDir. TempDir should delete once out of scope.")
+    }
+
+    fn test_custom_appender(rotation: Rotation, directory: TempDir, formatter: fn(&DateTime<Utc>) -> String) {
+        let mut appender = RollingFileAppender::new(rotation, directory.path(), CustomFormatter(formatter));
 
         let expected_value = "Hello";
         write_to_log(&mut appender, expected_value);
@@ -389,11 +544,29 @@ mod test {
     }
 
     #[test]
+    fn write_minutely_custom_log() {
+        test_custom_appender(
+            Rotation::HOURLY,
+            TempDir::new("minutely").expect("Failed to create tempdir"),
+            |_| format!("minutely.log"),
+        );
+    }
+
+    #[test]
     fn write_hourly_log() {
         test_appender(
             Rotation::HOURLY,
             TempDir::new("hourly").expect("Failed to create tempdir"),
             "hourly.log",
+        );
+    }
+
+    #[test]
+    fn write_hourly_custom_log() {
+        test_custom_appender(
+            Rotation::HOURLY,
+            TempDir::new("hourly").expect("Failed to create tempdir"),
+            |_| format!("hourly.log"),
         );
     }
 
@@ -407,11 +580,29 @@ mod test {
     }
 
     #[test]
+    fn write_daily_custom_log() {
+        test_custom_appender(
+            Rotation::DAILY,
+            TempDir::new("daily").expect("Failed to create tempdir"),
+            |_| format!("daily.log"),
+        );
+    }
+
+    #[test]
     fn write_never_log() {
         test_appender(
             Rotation::NEVER,
             TempDir::new("never").expect("Failed to create tempdir"),
             "never.log",
+        );
+    }
+
+    #[test]
+    fn write_never_custom_log() {
+        test_custom_appender(
+            Rotation::NEVER,
+            TempDir::new("never").expect("Failed to create tempdir"),
+            |_| format!("never.log"),
         );
     }
 
@@ -539,6 +730,15 @@ mod test {
     }
 
     #[test]
+    fn test_rotation_path_minutely_custom() {
+        let r = Rotation::MINUTELY;
+        let mock_now = Utc.ymd(2020, 2, 1).and_hms(10, 3, 1);
+        let formatter = CustomFormatter(|date| format!("MyApplication.{}.log", date.format("%F-%H-%M")));
+        let path = formatter.format(&r, &mock_now);
+        assert_eq!("MyApplication.2020-02-01-10-03.log", path);
+    }
+
+    #[test]
     fn test_rotation_path_hourly() {
         let r = Rotation::HOURLY;
         let mock_now = Utc.ymd(2020, 2, 1).and_hms(10, 3, 1);
@@ -547,11 +747,29 @@ mod test {
     }
 
     #[test]
+    fn test_rotation_path_hourly_custom() {
+        let r = Rotation::HOURLY;
+        let mock_now = Utc.ymd(2020, 2, 1).and_hms(10, 3, 1);
+        let formatter = CustomFormatter(|date| format!("MyApplication.{}.log", date.format("%F-%H")));
+        let path = formatter.format(&r, &mock_now);
+        assert_eq!("MyApplication.2020-02-01-10.log", path);
+    }
+
+    #[test]
     fn test_rotation_path_daily() {
         let r = Rotation::DAILY;
         let mock_now = Utc.ymd(2020, 2, 1).and_hms(10, 3, 1);
         let path = r.join_date("MyApplication.log", &mock_now);
         assert_eq!("MyApplication.log.2020-02-01", path);
+    }
+
+    #[test]
+    fn test_rotation_path_daily_custom() {
+        let r = Rotation::DAILY;
+        let mock_now = Utc.ymd(2020, 2, 1).and_hms(10, 3, 1);
+        let formatter = CustomFormatter(|date| format!("MyApplication.{}.log", date.format("%F")));
+        let path = formatter.format(&r, &mock_now);
+        assert_eq!("MyApplication.2020-02-01.log", path);
     }
 
     #[test]
